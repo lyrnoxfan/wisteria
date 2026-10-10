@@ -364,22 +364,39 @@ function initAudio(){
     if (!AC) return;
     const ac = new AC();
     amb.ac = ac;
-    const len = ac.sampleRate * 2;
-    const buf = ac.createBuffer(1, len, ac.sampleRate);
-    const chd = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) chd[i] = Math.random() * 2 - 1;
-    const loopSrc = () => {
+    // 粉噪（柔和，似自然风）+ 棕噪（低频 body），4 秒循环
+    const secs = 4, len = Math.floor(ac.sampleRate * secs);
+    const pinkBuf = ac.createBuffer(1, len, ac.sampleRate);
+    const pd = pinkBuf.getChannelData(0);
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i = 0; i < len; i++){
+      const wht = Math.random() * 2 - 1;
+      b0 = 0.99886*b0 + wht*0.0555179; b1 = 0.99332*b1 + wht*0.0750759;
+      b2 = 0.96900*b2 + wht*0.1538520; b3 = 0.86650*b3 + wht*0.3104856;
+      b4 = 0.55000*b4 + wht*0.5329522; b5 = -0.7616*b5 - wht*0.0168980;
+      pd[i] = (b0+b1+b2+b3+b4+b5+b6+wht*0.5362) * 0.11;
+      b6 = wht * 0.115926;
+    }
+    const brownBuf = ac.createBuffer(1, len, ac.sampleRate);
+    const bd = brownBuf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++){
+      const wht = Math.random() * 2 - 1;
+      last = (last + 0.02 * wht) / 1.02;
+      bd[i] = last * 3.5;
+    }
+    const loopSrc = (buf) => {
       const s = ac.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s;
     };
-    const chain = (type, freq, q) => {
+    const chain = (buf, type, freq, q) => {
       const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
       const g = ac.createGain(); g.gain.value = 0;
-      loopSrc().connect(f); f.connect(g); g.connect(ac.destination);
+      loopSrc(buf).connect(f); f.connect(g); g.connect(ac.destination);
       return { f, g };
     };
-    amb.wind = chain('lowpass', 360, 0.7);     // 风声主体
-    amb.hiss = chain('bandpass', 1000, 0.5);   // 风的哨音
-    amb.rustle = chain('highpass', 3600, 0.7); // 叶动声
+    amb.wind = chain(pinkBuf, 'lowpass', 500, 0.5);   // 主风：粉噪，柔和
+    amb.deep = chain(brownBuf, 'lowpass', 170, 0.5);  // 低频 body，阵风时起
+    amb.rustle = chain(pinkBuf, 'highpass', 4200, 0.6); // 叶动
     amb.song = ac.createGain();                // 鸟鸣母线
     const delay = ac.createDelay(1); delay.delayTime.value = 0.31;
     const fb = ac.createGain(); fb.gain.value = 0.3;
@@ -395,12 +412,18 @@ function updateAmbient(now, dt){
   if (!amb.ok) return;
   const w = wind.v, t = now * 0.001;
   const sm = (p, target, k) => { p.value += (target - p.value) * Math.min(1, dt * k); };
-  sm(amb.wind.g.gain, 0.03 + w * 0.42, 2.5); // 一直有底噪，阵风时明显起来
-  amb.wind.f.frequency.value = 300 + w * 320 + Math.sin(t * 0.23) * 90;
-  sm(amb.hiss.g.gain, Math.pow(w, 1.6) * 0.12, 2.5);
-  const rT = Math.pow(Math.max(0, w - 0.22), 1.5) * 0.9 *
-             (0.55 + 0.45 * Math.sin(t * 8.7) * Math.sin(t * 5.3 + 1.7));
-  sm(amb.rustle.g.gain, rT, 6);
+  // 有机起伏：两层极慢 LFO，让风有呼吸感，不单调
+  const lfo1 = Math.sin(t * 0.13 + 1.7) * 0.5 + Math.sin(t * 0.071 + 0.4) * 0.5;
+  const lfo2 = Math.sin(t * 0.21 + 3.1) * 0.5 + Math.sin(t * 0.113 + 1.2) * 0.5;
+  // 主风：粉噪一直有底，阵风时起来，叠加呼吸起伏
+  sm(amb.wind.g.gain, (0.035 + w * 0.38) * (1 + lfo1 * 0.28), 2.0);
+  amb.wind.f.frequency.value = 380 + w * 380 + lfo2 * 130;
+  // 低频 body：只在阵风时出来，有厚度
+  sm(amb.deep.g.gain, w * w * 0.5, 1.5);
+  // 叶动：高频 + 扑簌颤动（不是恒定嘶声）
+  const trem = 0.6 + 0.4 * Math.sin(t * 9.3) * Math.sin(t * 6.1 + 2.0);
+  const rT = Math.pow(Math.max(0, w - 0.18), 1.4) * 0.5 * trem;
+  sm(amb.rustle.g.gain, rT, 5);
 }
 
 /* 远处鸟鸣 */
