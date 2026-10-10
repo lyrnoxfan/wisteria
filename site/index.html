@@ -51,11 +51,13 @@ function size(){
   W = innerWidth; H = innerHeight;
   cv.width = W * dpr; cv.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  S = clamp(Math.min(W, H) / 800, 0.55, 1);
+  const portrait = H > W * 1.15;
+  S = clamp(Math.min(W, H) / 750, 0.68, 1);
   treeX = W > 700 ? W * 0.56 : W * 0.5;
   groundY = H * 0.94;
-  trunkTopY = H * 0.44;
-  canopyR = Math.min(W * 0.30, 430);
+  // 竖屏：树冠撑满宽度，树更高大
+  trunkTopY = H * (portrait ? 0.36 : 0.44);
+  canopyR = W * (portrait ? 0.44 : 0.30);
 }
 
 /* ================= 树 ================= */
@@ -240,8 +242,9 @@ function setPointer(e){
 }
 addEventListener('pointerdown', e => {
   pointer.active = true; pointer.vx = 0; pointer.vy = 0;
-  setPointer(e); initAudio();
+  setPointer(e); initAudio(); resumeAudio();
 });
+addEventListener('touchstart', () => { initAudio(); resumeAudio(); }, { passive: true });
 addEventListener('pointermove', e => {
   if (!pointer.active) return;
   setPointer(e);
@@ -250,14 +253,24 @@ addEventListener('pointermove', e => {
   if (sp > 900 && petals.length < 30 && rnd() < 0.5)
     spawnPetalAt(pointer.x + R(-30, 30), pointer.y + R(-30, 30), sp);
 });
+addEventListener('pointerup', () => { resumeAudio(); });
 const endPointer = () => { pointer.active = false; };
 addEventListener('pointerup', endPointer);
 addEventListener('pointercancel', endPointer);
-addEventListener('keydown', initAudio);
+addEventListener('keydown', () => { initAudio(); resumeAudio(); });
+document.addEventListener('visibilitychange', () => {
+  running = !document.hidden;
+  if (!document.hidden) resumeAudio();
+});
+function resumeAudio(){
+  if (amb.ok && amb.ac && amb.ac.state === 'suspended'){
+    amb.ac.resume().catch(() => {});
+  }
+}
 
 /* 弹簧：被拨开后弹回 */
 function springTouch(e, dt){
-  const Rr = 135 * S;
+  const Rr = 150 * S;
   if (pointer.active){
     const dx = (e.x + e.ox) - pointer.x, dy = (e.y + e.oy) - pointer.y;
     const d2 = dx * dx + dy * dy;
@@ -498,10 +511,10 @@ function updateAmbient(now, dt){
   if (!amb.ok) return;
   const w = wind.v, t = now * 0.001;
   const sm = (p, target, k) => { p.value += (target - p.value) * Math.min(1, dt * k); };
-  sm(amb.wind.g.gain, w * 0.13, 2.5);
+  sm(amb.wind.g.gain, 0.03 + w * 0.42, 2.5); // 一直有底噪，阵风时明显起来
   amb.wind.f.frequency.value = 300 + w * 320 + Math.sin(t * 0.23) * 90;
-  sm(amb.hiss.g.gain, Math.pow(w, 1.6) * 0.05, 2.5);
-  const rT = Math.pow(Math.max(0, w - 0.28), 1.6) * 0.5 *
+  sm(amb.hiss.g.gain, Math.pow(w, 1.6) * 0.12, 2.5);
+  const rT = Math.pow(Math.max(0, w - 0.22), 1.5) * 0.9 *
              (0.55 + 0.45 * Math.sin(t * 8.7) * Math.sin(t * 5.3 + 1.7));
   sm(amb.rustle.g.gain, rT, 6);
 }
@@ -639,7 +652,6 @@ function updateWalkers(dt, now){
 
 /* ================= 主循环 ================= */
 let last = 0, running = true;
-document.addEventListener('visibilitychange', () => { running = !document.hidden; });
 
 function frame(now){
   requestAnimationFrame(frame);
