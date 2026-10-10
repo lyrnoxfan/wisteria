@@ -13,7 +13,8 @@
   body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
     -webkit-font-smoothing:antialiased;animation:enter 2.4s ease both}
   @keyframes enter{from{opacity:0}to{opacity:1}}
-  #s{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:manipulation}
+  #s{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+  #s:active{cursor:grabbing}
   @media (prefers-reduced-motion:reduce){body{animation:none}}
 </style>
 </head>
@@ -22,9 +23,10 @@
 <script>
 "use strict";
 /* ============================================================
-   藤 — 日本紫藤 · 环境模拟
+   藤 — 日本紫藤 · 藤棚式伞形树冠
    留白 / 动画风 / 程序化
-   风(阵风) · 鸟(单只/成群) · 远处鸟鸣 · 树下驻足的行人
+   风(阵风+风声) · 鸟 · 远处鸟鸣 · 叶动声 · 树下驻足的行人
+   触摸：手指拨开枝叶，划动可拨乱并打落花瓣
    ============================================================ */
 const SEED = 20261010;
 function mulberry32(a){
@@ -42,49 +44,39 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 const cv = document.getElementById('s'), ctx = cv.getContext('2d');
 const dpr = Math.min(devicePixelRatio || 1, 2);
-let W = 0, H = 0, treeX = 0, groundY = 0;
+let W = 0, H = 0, S = 1;
+let treeX = 0, groundY = 0, trunkTopY = 0, canopyR = 0;
 
 function size(){
   W = innerWidth; H = innerHeight;
   cv.width = W * dpr; cv.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  treeX = W > 700 ? W * 0.60 : W * 0.5;
+  S = clamp(Math.min(W, H) / 800, 0.55, 1);
+  treeX = W > 700 ? W * 0.56 : W * 0.5;
   groundY = H * 0.94;
+  trunkTopY = H * 0.44;
+  canopyR = Math.min(W * 0.30, 430);
 }
 
-/* ================= 树：结构生成 ================= */
-const branches = [], clusters = [], leafAt = [];
+/* ================= 树 ================= */
+const trunk = { pts: [], w0: 0, w1: 0 };
+const limbs = [];    // 主枝（静态，预渲染进 wood）
+const clusters = []; // 花穗（动态：摆动+触摸）
+const leaves = [];   // 复叶（动态：微摆+触摸），全部贴枝生长
 
-function genBranch(x, y, angle, len, wid, depth){
-  const pts = [[x, y]];
-  let cx = x, cy = y, ca = angle;
-  const segs = 4, bend = depth >= 4 ? 0.62 : 0.42;
+function genTrunk(){
+  const segs = 10;
+  let x = treeX + R(-12, 12) * S, y = H + 60;
+  let ang = -Math.PI / 2 + R(-0.1, 0.1);
+  trunk.pts = [[x, y]];
+  const totalLen = y - trunkTopY;
+  trunk.w0 = 54 * S; trunk.w1 = 17 * S;
   for (let i = 0; i < segs; i++){
-    ca += (rnd() - 0.5) * bend;
-    ca = ca * 0.86 + (-Math.PI / 2) * 0.14;
-    const sl = len / segs;
-    cx += Math.cos(ca) * sl; cy += Math.sin(ca) * sl;
-    pts.push([cx, cy]);
-  }
-  branches.push({ pts, w0: wid, w1: Math.max(wid * 0.6, 0.8), depth });
-  const tip = pts[pts.length - 1];
-  if (depth <= 0 || wid < 1.4){
-    if (rnd() < 0.8) addCluster(tip[0], tip[1]);
-    else leafAt.push({ x: tip[0], y: tip[1], angle: ca, s: R(0.7, 1) });
-    return;
-  }
-  if (depth <= 2){
-    const n = depth === 2 ? 2 : 1;
-    for (let i = 0; i < n; i++){
-      const p = pts[1 + Math.floor(rnd() * (pts.length - 1))];
-      if (rnd() < 0.75) addCluster(p[0], p[1]);
-    }
-    if (rnd() < 0.5) leafAt.push({ x: tip[0], y: tip[1], angle: ca, s: R(0.6, 1) });
-  }
-  const kids = depth >= 4 ? 3 : 2;
-  for (let k = 0; k < kids; k++){
-    const na = ca + (rnd() - 0.5) * 1.05 + (k - (kids - 1) / 2) * 0.55;
-    genBranch(cx, cy, na, len * R(0.6, 0.76), wid * 0.6, depth - 1);
+    ang += R(-0.55, 0.55);                    // 虬曲
+    ang = ang * 0.76 + (-Math.PI / 2) * 0.24; // 拉回向上
+    const sl = totalLen / segs * R(0.92, 1.08);
+    x += Math.cos(ang) * sl; y += Math.sin(ang) * sl;
+    trunk.pts.push([x, y]);
   }
 }
 
@@ -92,121 +84,129 @@ function lerpC(c1, c2, t){
   return [0, 1, 2].map(i => Math.round(c1[i] + (c2[i] - c1[i]) * t));
 }
 
-/* 花穗(总状花序)精灵：预渲染 + 钟摆微摆 */
-function addCluster(x, y){
-  if (clusters.length > 85) return;
-  const len = R(70, 175), maxW = R(15, 24);
+/* 花穗：总状花序，细长下垂 */
+function addCluster(x, y, s){
+  if (clusters.length >= 140) return;
+  const len = R(105, 200) * S * s, maxW = R(13, 19) * S * s;
   const variant = rnd();
-  const top = variant < 0.7 ? [95, 67, 152] : variant < 0.9 ? [122, 96, 178] : [196, 130, 170];
-  const tip = variant < 0.7 ? [226, 208, 242] : variant < 0.9 ? [232, 220, 246] : [248, 228, 238];
-  const pad = 26, cw = (maxW + pad) * 2, ch = len + pad * 2;
+  const top = variant < 0.7 ? [93, 64, 150] : variant < 0.9 ? [120, 94, 176] : [194, 128, 168];
+  const tip = variant < 0.7 ? [228, 210, 244] : variant < 0.9 ? [234, 222, 248] : [250, 230, 240];
+  const pad = 26 * S, cw = (maxW + pad) * 2, ch = len + pad * 2;
   const c = document.createElement('canvas');
-  c.width = cw * dpr; c.height = ch * dpr;
+  c.width = Math.max(2, cw * dpr); c.height = Math.max(2, ch * dpr);
   const g = c.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const ox = cw / 2, oy = pad;
-  g.strokeStyle = 'rgba(110,105,80,.55)'; g.lineWidth = 1.6;
-  g.beginPath(); g.moveTo(ox, oy - 6); g.lineTo(ox, oy + len); g.stroke();
-  const n = Math.floor(len / 3.1);
+  g.strokeStyle = 'rgba(110,105,80,.55)'; g.lineWidth = 1.6 * S;
+  g.beginPath(); g.moveTo(ox, oy - 6 * S); g.lineTo(ox, oy + len); g.stroke();
+  const n = Math.floor(len / (3.0 * S));
   for (let i = 0; i < n; i++){
     const t = i / n;
     const wprof = Math.pow(Math.sin(Math.PI * Math.min(t * 1.12, 1)), 0.75);
     const spread = maxW * wprof;
-    const fy = oy + t * len + R(-2, 2);
+    const fy = oy + t * len + R(-2, 2) * S;
     const fx = ox + R(-1, 1) * spread;
-    const s = R(2.6, 4.6) * (1 - t * 0.35);
+    const s2 = R(2.6, 4.4) * S * (1 - t * 0.35);
     const col = lerpC(top, tip, Math.min(t * 1.1, 1));
     const jitter = R(-14, 14);
     g.fillStyle = `rgba(${col[0] + jitter | 0},${col[1] + jitter | 0},${col[2] + jitter | 0},${R(.82, 1).toFixed(2)})`;
     g.beginPath();
-    g.ellipse(fx, fy, s, s * 0.78, R(0, TAU), 0, TAU);
+    g.ellipse(fx, fy, s2, s2 * 0.78, R(0, TAU), 0, TAU);
     g.fill();
     if (rnd() < 0.4){
       g.fillStyle = 'rgba(255,240,180,.8)';
-      g.beginPath(); g.arc(fx, fy, s * 0.28, 0, TAU); g.fill();
+      g.beginPath(); g.arc(fx, fy, s2 * 0.28, 0, TAU); g.fill();
     }
   }
   clusters.push({
     x, y, sprite: c, sw: cw, sh: ch,
     phase: R(0, TAU), speed: R(0.5, 0.9), amp: R(0.035, 0.085),
+    ox: 0, oy: 0, vx: 0, vy: 0,
   });
 }
 
-/* 羽状复叶精灵 */
-function leafSpray(){
-  const c = document.createElement('canvas');
-  const s = 90;
-  c.width = s * dpr; c.height = s * dpr;
-  const g = c.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.translate(s / 2, s / 2);
-  g.strokeStyle = 'rgba(105,125,90,.8)'; g.lineWidth = 1.6;
-  g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -34); g.stroke();
-  for (let i = 0; i < 5; i++){
-    const t = i / 4, y = -6 - t * 26, w = 13 * (1 - t * 0.45);
-    for (const dir of [-1, 1]){
-      g.fillStyle = `rgba(${118 + R(-12, 12) | 0},${150 + R(-12, 12) | 0},${104 + R(-10, 10) | 0},.92)`;
-      g.beginPath();
-      g.ellipse(dir * w * 0.62, y, w * 0.62, w * 0.3, dir * 0.5, 0, TAU);
-      g.fill();
-    }
-  }
-  g.fillStyle = 'rgba(120,152,106,.95)';
-  g.beginPath(); g.ellipse(0, -36, 5.5, 3.4, 0, 0, TAU); g.fill();
-  return c;
+/* 复叶：羽状，锚定在枝条上 */
+function addLeaf(x, y, up){
+  leaves.push({
+    x, y, up, tilt: R(-0.45, 0.45), s: R(0.65, 1.05),
+    phase: R(0, TAU), ox: 0, oy: 0, vx: 0, vy: 0,
+  });
 }
-const leafImg = leafSpray();
 
-/* 木质部 + 地面：预渲染（静态层） */
+function genLimbs(){
+  const top = trunk.pts[trunk.pts.length - 1];
+  const n = 6;
+  for (let i = 0; i < n; i++){
+    const f = i / (n - 1) - 0.5; // -0.5..0.5
+    // 目标端点：伞形——外侧枝端下垂，中央稍高
+    const tx = top[0] + f * 2 * canopyR * 0.95;
+    const ty = top[1] - 50 * S + Math.abs(f) * 130 * S;
+    let x = top[0] + R(-14, 14) * S, y = top[1] + R(-10, 14) * S;
+    const pts = [[x, y]];
+    const segs = 7;
+    for (let sgm = 0; sgm < segs; sgm++){
+      const t = (sgm + 1) / segs;
+      const ix = top[0] + (tx - top[0]) * t;
+      const iy = top[1] + (ty - top[1]) * t - Math.sin(t * Math.PI) * 30 * S;
+      x += (ix - x) * 0.55 + R(-14, 14) * S;
+      y += (iy - y) * 0.55 + R(-14, 14) * S;
+      pts.push([x, y]);
+      if (sgm >= 1){
+        const ncl = 1 + (rnd() < 0.75 ? 1 : 0);
+        for (let k = 0; k < ncl; k++)
+          addCluster(x + R(-10, 10) * S, y + R(0, 8) * S, R(0.8, 1.05));
+      }
+      if (rnd() < 0.62) addLeaf(x + R(-8, 8) * S, y - R(4, 12) * S, -1);
+      if (rnd() < 0.22) addLeaf(x + R(-8, 8) * S, y + R(6, 14) * S, 1);
+    }
+    const tip = pts[pts.length - 1];
+    addCluster(tip[0] + R(-6, 6) * S, tip[1] + 4 * S, R(0.7, 0.9));
+    limbs.push({ pts, w0: 15 * S, w1: 2.2 * S });
+  }
+  for (let i = 0; i < 14; i++)
+    addCluster(top[0] + R(-70, 70) * S, top[1] + R(-10, 40) * S, R(0.7, 1));
+}
+
+/* 木质部 + 地面：预渲染静态层 */
 const wood = document.createElement('canvas');
+function strokePath(g, pts, w0, w1, color){
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  const n = pts.length - 1;
+  for (let i = 0; i < n; i++){
+    const w = w0 + (w1 - w0) * (i / n);
+    g.strokeStyle = color(i / n);
+    g.lineWidth = Math.max(w, 0.8);
+    g.beginPath();
+    g.moveTo(pts[i][0], pts[i][1]);
+    g.lineTo(pts[i + 1][0], pts[i + 1][1]);
+    g.stroke();
+  }
+}
 function renderWood(){
   wood.width = W * dpr; wood.height = H * dpr;
   const g = wood.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // 地面：极淡的 wash，让行人有落脚处
   const gg = g.createLinearGradient(0, groundY - H * 0.06, 0, H);
   gg.addColorStop(0, 'rgba(178,184,168,0)');
   gg.addColorStop(1, 'rgba(178,184,168,0.16)');
   g.fillStyle = gg;
   g.fillRect(0, groundY - H * 0.06, W, H * 0.06 + 2);
-  // 树影
-  const sh = g.createRadialGradient(treeX, groundY + 4, 4, treeX, groundY + 4, 150);
+  const sh = g.createRadialGradient(treeX, groundY + 4, 4, treeX, groundY + 4, 170 * S);
   sh.addColorStop(0, 'rgba(120,118,108,0.10)');
   sh.addColorStop(1, 'rgba(120,118,108,0)');
   g.fillStyle = sh;
-  g.fillRect(treeX - 150, groundY - 60, 300, 120);
-  // 枝干
-  g.lineCap = 'round'; g.lineJoin = 'round';
-  for (const b of branches){
-    const n = b.pts.length - 1;
-    for (let i = 0; i < n; i++){
-      const w = b.w0 + (b.w1 - b.w0) * (i / n);
-      const shade = 66 + (b.depth * 4) % 14;
-      g.strokeStyle = `rgb(${shade + 8},${shade - 2},${shade - 12})`;
-      g.lineWidth = w;
-      g.beginPath();
-      g.moveTo(b.pts[i][0], b.pts[i][1]);
-      g.lineTo(b.pts[i + 1][0], b.pts[i + 1][1]);
-      g.stroke();
-    }
-  }
-  g.strokeStyle = 'rgb(70,60,50)'; g.lineWidth = 30;
-  g.beginPath(); g.moveTo(treeX, H + 30); g.lineTo(treeX, groundY - 26); g.stroke();
-  // 复叶
-  for (const l of leafAt){
-    g.save();
-    g.translate(l.x, l.y); g.rotate(l.angle + Math.PI / 2 + R(-0.5, 0.5));
-    const s = 44 * l.s;
-    g.drawImage(leafImg, -s / 2, -s, s, s);
-    g.restore();
-  }
-  // 地面散落的花瓣（静态）
+  g.fillRect(treeX - 180 * S, groundY - 70 * S, 360 * S, 140 * S);
+  strokePath(g, trunk.pts, trunk.w0, trunk.w1,
+    t => `rgb(${74 - t * 8},${66 - t * 8},${58 - t * 8})`);
+  for (const b of limbs)
+    strokePath(g, b.pts, b.w0, b.w1,
+      t => `rgb(${82 - t * 10},${74 - t * 10},${64 - t * 10})`);
   for (let i = 0; i < 14; i++){
-    const px = treeX + R(-160, 160), py = groundY + R(-6, 10);
+    const px = treeX + R(-170, 170) * S, py = groundY + R(-6, 10);
     g.save();
     g.translate(px, py); g.rotate(R(0, TAU));
-    g.fillStyle = `rgba(${R(150,180)|0},${R(125,150)|0},${R(185,205)|0},0.5)`;
-    g.beginPath(); g.ellipse(0, 0, R(2.5, 4.5), R(1.8, 3.2), 0, 0, TAU); g.fill();
+    g.fillStyle = `rgba(${R(150, 180) | 0},${R(125, 150) | 0},${R(185, 205) | 0},0.5)`;
+    g.beginPath(); g.ellipse(0, 0, R(2.5, 4.5) * S, R(1.8, 3.2) * S, 0, 0, TAU); g.fill();
     g.restore();
   }
 }
@@ -216,7 +216,6 @@ const wind = { v: 0.08, target: 0.08, holdUntil: 0, dir: 1 };
 function updateWind(now, dt){
   if (now > wind.holdUntil){
     if (rnd() < 0.38){
-      // 一阵风
       wind.target = R(0.5, 0.9);
       wind.holdUntil = now + R(4000, 8000);
       if (rnd() < 0.25) wind.dir *= -1;
@@ -229,30 +228,82 @@ function updateWind(now, dt){
   wind.v += (wind.target - wind.v) * k;
 }
 
+/* ================= 触摸：拨开枝叶 ================= */
+const pointer = { active: false, x: 0, y: 0, vx: 0, vy: 0 };
+function setPointer(e){
+  const nx = e.clientX, ny = e.clientY;
+  if (pointer.active){
+    pointer.vx = pointer.vx * 0.6 + (nx - pointer.x) * 0.4 * 60;
+    pointer.vy = pointer.vy * 0.6 + (ny - pointer.y) * 0.4 * 60;
+  }
+  pointer.x = nx; pointer.y = ny;
+}
+addEventListener('pointerdown', e => {
+  pointer.active = true; pointer.vx = 0; pointer.vy = 0;
+  setPointer(e); initAudio();
+});
+addEventListener('pointermove', e => {
+  if (!pointer.active) return;
+  setPointer(e);
+  // 快速划动打落花瓣
+  const sp = Math.hypot(pointer.vx, pointer.vy);
+  if (sp > 900 && petals.length < 30 && rnd() < 0.5)
+    spawnPetalAt(pointer.x + R(-30, 30), pointer.y + R(-30, 30), sp);
+});
+const endPointer = () => { pointer.active = false; };
+addEventListener('pointerup', endPointer);
+addEventListener('pointercancel', endPointer);
+addEventListener('keydown', initAudio);
+
+/* 弹簧：被拨开后弹回 */
+function springTouch(e, dt){
+  const Rr = 135 * S;
+  if (pointer.active){
+    const dx = (e.x + e.ox) - pointer.x, dy = (e.y + e.oy) - pointer.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < Rr * Rr){
+      const d = Math.sqrt(d2) || 1;
+      const f = 1 - d / Rr;
+      e.vx += ((dx / d) * f * 1100 + pointer.vx * f * 2.4) * dt;
+      e.vy += ((dy / d) * f * 1100 + pointer.vy * f * 2.4) * dt;
+    }
+  }
+  e.vx += (-e.ox * 26 - e.vx * 6.5) * dt;
+  e.vy += (-e.oy * 26 - e.vy * 6.5) * dt;
+  e.ox = clamp(e.ox + e.vx * dt, -95 * S, 95 * S);
+  e.oy = clamp(e.oy + e.vy * dt, -95 * S, 95 * S);
+}
+
 /* ================= 落花 ================= */
 let petals = [];
-function spawnPetal(burst){
+let petalAcc = 0;
+function spawnPetal(){
   if (clusters.length === 0) return;
   const c = clusters[Math.floor(rnd() * clusters.length)];
+  spawnPetalAt(c.x + c.ox + R(-14, 14) * S, c.y + c.oy + R(20, 60) * S, 0);
+}
+function spawnPetalAt(x, y, kick){
+  if (petals.length > 34) return;
   petals.push({
-    x: c.x + R(-14, 14), y: c.y + R(20, c.sh * 0.5),
-    s: R(2.5, 4.5), vy: R(24, 48), ph: R(0, TAU), sw: R(.5, 1.2),
+    x, y, vx: R(-40, 40) * S + (kick ? R(-1, 1) * kick * 0.25 : 0),
+    s: R(2.5, 4.5) * S, vy: R(24, 48) * S, ph: R(0, TAU), sw: R(.5, 1.2),
     rot: R(0, TAU), vr: R(-1.5, 1.5), a: 0,
     col: [R(120, 160) | 0, R(95, 130) | 0, R(170, 200) | 0],
-    drift: burst ? R(40, 110) : R(6, 20),
+    drift: R(6, 20),
   });
 }
-function updatePetals(dt, now){
-  // 基础掉落 + 风越大掉得越多
+function updatePetals(dt){
   petalAcc += dt * (0.7 + wind.v * 6);
   while (petalAcc > 1 && petals.length < 34){
     petalAcc -= 1;
-    spawnPetal(wind.v > 0.45 && rnd() < 0.5);
+    spawnPetal();
   }
   for (let i = petals.length - 1; i >= 0; i--){
     const p = petals[i];
+    p.vy = Math.min(p.vy + 30 * dt, 60 * S);
     p.y += p.vy * dt; p.ph += dt * 1.3; p.rot += p.vr * dt;
-    p.x += (Math.sin(p.ph) * p.sw * 24 + p.drift * wind.v * wind.dir) * dt;
+    p.x += (p.vx + Math.sin(p.ph) * p.sw * 24 * S + p.drift * wind.v * wind.dir * S) * dt;
+    p.vx *= (1 - Math.min(1, dt * 1.5));
     p.a = Math.min(.9, p.a + dt);
     if (p.y > groundY + 6) p.a -= dt * 2.2;
     if (p.a <= 0 && p.y > groundY){ petals.splice(i, 1); continue; }
@@ -265,7 +316,45 @@ function updatePetals(dt, now){
     ctx.restore();
   }
 }
-let petalAcc = 0;
+
+/* ================= 动态枝叶绘制 ================= */
+function drawLeaves(now, dt){
+  for (const l of leaves){
+    springTouch(l, dt);
+    const flutter = Math.sin(now * 0.005 + l.phase) * (0.05 + wind.v * 0.4);
+    ctx.save();
+    ctx.translate(l.x + l.ox, l.y + l.oy);
+    ctx.rotate((l.up < 0 ? -Math.PI / 2 : Math.PI / 2) + l.tilt + flutter + l.ox * 0.003);
+    const s = 42 * S * l.s;
+    ctx.strokeStyle = 'rgba(105,125,90,.9)'; ctx.lineWidth = Math.max(1.2, 1.6 * S);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -s); ctx.stroke();
+    for (let i = 0; i < 5; i++){
+      const t = i / 4, yy = -s * 0.18 - t * s * 0.68, w = s * 0.30 * (1 - t * 0.42);
+      for (const dir of [-1, 1]){
+        ctx.fillStyle = `rgba(${118 + R(-12, 12) | 0},${150 + R(-12, 12) | 0},${104 + R(-10, 10) | 0},.92)`;
+        ctx.beginPath();
+        ctx.ellipse(dir * w * 0.62, yy, w * 0.62, w * 0.3, dir * 0.45, 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.fillStyle = 'rgba(120,152,106,.95)';
+    ctx.beginPath(); ctx.ellipse(0, -s, s * 0.12, s * 0.075, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawClusters(now, dt){
+  const swayBoost = 1 + wind.v * 2.4;
+  for (const c of clusters){
+    springTouch(c, dt);
+    const ang = Math.sin(now * 0.001 * c.speed * (1 + wind.v * 0.7) + c.phase) * c.amp * swayBoost
+              + wind.v * wind.dir * 0.10 + c.ox * 0.004;
+    ctx.save();
+    ctx.translate(c.x + c.ox, c.y + c.oy); ctx.rotate(ang);
+    ctx.drawImage(c.sprite, -c.sw / 2, -8 * S, c.sw, c.sh);
+    ctx.restore();
+  }
+}
 
 /* ================= 鸟 ================= */
 let birds = [];
@@ -275,114 +364,156 @@ function scheduleBird(now, first){
 }
 function spawnBirds(){
   const kind = rnd();
-  const dir = rnd() < 0.5 ? 1 : -1;         // 1: 左→右
-  const y = H * R(0.10, 0.38);
-  const speed = (W * R(0.06, 0.10)) * dir;  // px/s
-  if (kind < 0.55){
-    // 一两只远鸟
-    const n = rnd() < 0.6 ? 1 : 2;
-    for (let i = 0; i < n; i++){
-      birds.push(makeBird('far', dir, y + R(-30, 30), speed * R(0.9, 1.1), i * R(60, 120)));
-    }
+  const dir = rnd() < 0.5 ? 1 : -1;
+  const speed = W * R(0.06, 0.10);
+  if (kind < 0.5){
+    const n = rnd() < 0.65 ? 1 : 2;
+    for (let i = 0; i < n; i++)
+      birds.push(makeBird(false, dir, H * R(0.22, 0.45) + R(-20, 20), speed * R(0.9, 1.1), i * R(70, 130)));
   } else if (kind < 0.8){
-    // 一群：3~7 只，松散人字
-    const n = 3 + Math.floor(rnd() * 5);
+    const n = 4 + Math.floor(rnd() * 4);
+    const y = H * R(0.08, 0.25);
     for (let i = 0; i < n; i++){
       const row = Math.ceil(i / 2);
-      birds.push(makeBird('far', dir, y + row * R(26, 40),
-        speed * R(0.95, 1.05), i * R(40, 80) + row * 60));
+      birds.push(makeBird(true, dir, y + row * R(24, 38), speed * R(0.95, 1.05), i * R(40, 80) + row * 60));
       const b = birds[birds.length - 1];
       b.x += dir * -row * R(46, 70);
     }
   } else {
-    // 近处一对：稍大的剪影
-    for (let i = 0; i < 2; i++){
-      birds.push(makeBird('near', dir, y + R(-20, 40), speed * 1.15 * R(0.95, 1.05), i * R(90, 150)));
-    }
+    for (let i = 0; i < 2; i++)
+      birds.push(makeBird(false, dir, H * R(0.3, 0.5), speed * 1.15 * R(0.95, 1.05), i * R(90, 150)));
   }
 }
-function makeBird(type, dir, y, speed, trail){
+function makeBird(far, dir, y, speed, trail){
   return {
-    type, dir, y0: y, speed,
+    far, dir, y0: y, speed: speed * dir,
     x: dir > 0 ? -60 - trail : W + 60 + trail,
-    ph: R(0, TAU), flap: R(6, 9),
-    size: type === 'near' ? R(15, 20) : R(7, 11),
+    ph: R(0, TAU), flapSpeed: R(7, 10),
+    size: (far ? R(7, 11) : R(15, 22)) * S,
+    alpha: far ? R(0.5, 0.65) : R(0.8, 0.9),
     bob: R(8, 20), bobF: R(0.5, 0.9),
+    glideT: 0, flapT: R(1, 3),
   };
+}
+function drawBird(b, y){
+  const s = b.size;
+  const gliding = b.glideT > 0;
+  const flap = gliding ? 0.15 : Math.sin(b.ph);
+  ctx.save();
+  ctx.translate(b.x, y);
+  if (b.dir < 0) ctx.scale(-1, 1);
+  if (b.far){
+    ctx.strokeStyle = `rgba(110,114,118,${b.alpha})`;
+    ctx.lineWidth = Math.max(1.5, s * 0.2); ctx.lineCap = 'round';
+    const w = flap * s * 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-s, -w * 0.35);
+    ctx.quadraticCurveTo(-s * 0.4, -w, 0, 0);
+    ctx.quadraticCurveTo(s * 0.4, -w, s, -w * 0.35);
+    ctx.stroke();
+  } else {
+    const ink = `rgba(82,86,90,${b.alpha})`;
+    ctx.fillStyle = ink;
+    ctx.beginPath(); // 尾
+    ctx.moveTo(-s * 0.4, -s * 0.02);
+    ctx.lineTo(-s * 0.95, -s * 0.14);
+    ctx.lineTo(-s * 0.88, s * 0.08);
+    ctx.closePath(); ctx.fill();
+    ctx.save(); // 翅
+    ctx.translate(-s * 0.02, -s * 0.04);
+    ctx.rotate(-flap * 1.05 - 0.12);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-s * 0.45, -s * 0.85, -s * 1.05, -s * 1.0);
+    ctx.quadraticCurveTo(-s * 0.5, -s * 0.5, s * 0.05, s * 0.06);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.beginPath(); // 身体
+    ctx.ellipse(0, 0, s * 0.52, s * 0.2, -0.06, 0, TAU);
+    ctx.fill();
+    ctx.beginPath(); // 头
+    ctx.arc(s * 0.44, -s * 0.07, s * 0.15, 0, TAU);
+    ctx.fill();
+    ctx.beginPath(); // 喙
+    ctx.moveTo(s * 0.56, -s * 0.09);
+    ctx.lineTo(s * 0.72, -s * 0.03);
+    ctx.lineTo(s * 0.56, s * 0.0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
 }
 function updateBirds(dt, now){
   if (now > nextBirdAt){ spawnBirds(); scheduleBird(now, false); }
-  ctx.lineCap = 'round';
   for (let i = birds.length - 1; i >= 0; i--){
     const b = birds[i];
-    b.x += b.speed * dt; b.ph += dt * b.flap;
-    const y = b.y0 + Math.sin(now * 0.001 * b.bobF + b.ph) * b.bob;
-    const flap = Math.sin(b.ph); // -1..1
-    if (b.type === 'far'){
-      // 远鸟：鸥形双弧，翅膀扇动
-      const s = b.size, f = flap * s * 0.9;
-      ctx.strokeStyle = 'rgba(96,101,106,0.72)';
-      ctx.lineWidth = Math.max(1.6, s * 0.22);
-      ctx.beginPath();
-      ctx.moveTo(b.x - s, y - f * 0.4);
-      ctx.quadraticCurveTo(b.x - s * 0.45, y - f, b.x, y);
-      ctx.quadraticCurveTo(b.x + s * 0.45, y - f, b.x + s, y - f * 0.4);
-      ctx.stroke();
-    } else {
-      // 近鸟：身体 + 扇动翅膀的剪影
-      const s = b.size, wa = flap * 0.9;
-      ctx.save();
-      ctx.translate(b.x, y);
-      if (b.dir < 0) ctx.scale(-1, 1);
-      ctx.fillStyle = 'rgba(88,90,94,0.85)';
-      ctx.beginPath(); ctx.ellipse(0, 0, s * 0.55, s * 0.28, 0, 0, TAU); ctx.fill();
-      for (const sd of [-1, 1]){
-        ctx.save();
-        ctx.rotate(sd * (0.35 + wa * 0.75));
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(sd * s * 1.5, -s * 0.25);
-        ctx.lineTo(sd * s * 0.9, s * 0.28);
-        ctx.closePath(); ctx.fill();
-        ctx.restore();
-      }
-      ctx.restore();
+    b.x += b.speed * dt; b.ph += dt * b.flapSpeed;
+    if (b.glideT > 0) b.glideT -= dt;
+    else {
+      b.flapT -= dt;
+      if (b.flapT <= 0){ b.glideT = R(0.8, 2.2); b.flapT = R(1.5, 4); }
     }
+    const y = b.y0 + Math.sin(now * 0.001 * b.bobF + b.ph) * b.bob;
+    drawBird(b, y);
     if ((b.dir > 0 && b.x > W + 90) || (b.dir < 0 && b.x < -90)) birds.splice(i, 1);
   }
 }
 
-/* ================= 远处鸟鸣（WebAudio 合成） ================= */
-const song = { nextAt: 0, ctx: null, master: null, ready: false };
-function scheduleSong(now, first){
-  song.nextAt = now + (first ? R(20000, 45000) : R(55000, 150000));
-}
-function unlockAudio(){
-  if (song.ready) return;
+/* ================= 环境音（WebAudio 合成） ================= */
+const amb = { ok: false };
+function initAudio(){
+  if (amb.ok) return;
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     const ac = new AC();
-    const master = ac.createGain(); master.gain.value = 0;
-    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
-    // 简单空间感：延迟回声
+    amb.ac = ac;
+    const len = ac.sampleRate * 2;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const chd = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) chd[i] = Math.random() * 2 - 1;
+    const loopSrc = () => {
+      const s = ac.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s;
+    };
+    const chain = (type, freq, q) => {
+      const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+      const g = ac.createGain(); g.gain.value = 0;
+      loopSrc().connect(f); f.connect(g); g.connect(ac.destination);
+      return { f, g };
+    };
+    amb.wind = chain('lowpass', 360, 0.7);     // 风声主体
+    amb.hiss = chain('bandpass', 1000, 0.5);   // 风的哨音
+    amb.rustle = chain('highpass', 3600, 0.7); // 叶动声
+    amb.song = ac.createGain();                // 鸟鸣母线
     const delay = ac.createDelay(1); delay.delayTime.value = 0.31;
-    const fb = ac.createGain(); fb.gain.value = 0.32;
-    const wet = ac.createGain(); wet.gain.value = 0.25;
-    master.connect(lp); lp.connect(ac.destination);
-    master.connect(delay); delay.connect(fb); fb.connect(delay);
+    const fb = ac.createGain(); fb.gain.value = 0.3;
+    const wet = ac.createGain(); wet.gain.value = 0.22;
+    amb.song.connect(ac.destination);
+    amb.song.connect(delay); delay.connect(fb); fb.connect(delay);
     delay.connect(wet); wet.connect(ac.destination);
-    song.ctx = ac; song.master = master; song.ready = true;
+    amb.ok = true;
     if (ac.state === 'suspended') ac.resume();
-  } catch (e) { /* 静默：没有声音也不影响画面 */ }
+  } catch (e) { /* 无声也不影响画面 */ }
 }
-addEventListener('pointerdown', unlockAudio, { passive: true });
-addEventListener('touchstart', unlockAudio, { passive: true });
-addEventListener('keydown', unlockAudio);
+function updateAmbient(now, dt){
+  if (!amb.ok) return;
+  const w = wind.v, t = now * 0.001;
+  const sm = (p, target, k) => { p.value += (target - p.value) * Math.min(1, dt * k); };
+  sm(amb.wind.g.gain, w * 0.13, 2.5);
+  amb.wind.f.frequency.value = 300 + w * 320 + Math.sin(t * 0.23) * 90;
+  sm(amb.hiss.g.gain, Math.pow(w, 1.6) * 0.05, 2.5);
+  const rT = Math.pow(Math.max(0, w - 0.28), 1.6) * 0.5 *
+             (0.55 + 0.45 * Math.sin(t * 8.7) * Math.sin(t * 5.3 + 1.7));
+  sm(amb.rustle.g.gain, rT, 6);
+}
 
+/* 远处鸟鸣 */
+const song = { nextAt: 0 };
+function scheduleSong(now, first){
+  song.nextAt = now + (first ? R(20000, 45000) : R(55000, 150000));
+}
 function playSong(){
-  if (!song.ready || !song.ctx) return;
-  const ac = song.ctx;
+  if (!amb.ok) return;
+  const ac = amb.ac;
   if (ac.state === 'suspended') ac.resume();
   const t0 = ac.currentTime + 0.1;
   const phrases = 2 + Math.floor(rnd() * 4);
@@ -390,8 +521,8 @@ function playSong(){
   const bp = ac.createBiquadFilter(); bp.type = 'bandpass';
   bp.frequency.value = R(2600, 3600); bp.Q.value = 1.1;
   const pan = ac.createStereoPanner ? ac.createStereoPanner() : null;
-  if (pan){ pan.pan.value = R(-0.5, 0.5); bp.connect(pan); pan.connect(song.master); }
-  else bp.connect(song.master);
+  if (pan){ pan.pan.value = R(-0.5, 0.5); bp.connect(pan); pan.connect(amb.song); }
+  else bp.connect(amb.song);
   for (let p = 0; p < phrases; p++){
     const chirps = 2 + Math.floor(rnd() * 3);
     for (let c = 0; c < chirps; c++){
@@ -410,9 +541,8 @@ function playSong(){
     t += R(0.5, 1.3);
   }
   const total = t - t0 + 1;
-  // 远→近→远：整体淡入淡出
   const peak = R(0.05, 0.09);
-  const mg = song.master.gain;
+  const mg = amb.song.gain;
   mg.cancelScheduledValues(t0);
   mg.setValueAtTime(0.0001, t0);
   mg.linearRampToValueAtTime(peak, t0 + 2.2);
@@ -434,48 +564,59 @@ function spawnWalkers(){
   const n = rnd() < 0.7 ? 1 : 2;
   const hBase = H * R(0.105, 0.13);
   for (let i = 0; i < n; i++){
-    const h = hBase * R(0.92, 1.08);
     walkers.push({
-      dir, h,
+      dir, h: hBase * R(0.92, 1.08),
       x: dir > 0 ? -40 - i * R(70, 110) : W + 40 + i * R(70, 110),
       speed: dir * R(34, 52),
       phase: R(0, TAU), stride: R(4.4, 5.4),
-      state: 'walk', pauseT: 0,
-      tone: R(95, 125) | 0,
-      looked: false,
+      state: 'walk', pauseT: 0, lookK: 0,
+      tone: R(95, 125) | 0, looked: false,
     });
   }
 }
-function drawWalker(w, now){
+function drawWalker(w, dt){
   const h = w.h, x = w.x, gy = groundY + 4;
   const walking = w.state === 'walk';
-  const bob = walking ? Math.abs(Math.sin(w.phase)) * h * 0.02 : Math.sin(now * 0.001 * 1.4) * h * 0.006;
-  const ink = `rgba(${w.tone},${w.tone + 3},${w.tone - 2},0.88)`;
-  const headR = h * 0.095;
-  const hipY = gy - h * 0.48 + bob, neckY = gy - h * 0.80 + bob;
-  const headY = neckY - headR * 1.5 + (w.state === 'pause' ? -headR * 0.35 : 0); // 驻足时微微抬头
-  ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineCap = 'round';
-  // 腿
-  ctx.lineWidth = h * 0.055;
-  for (const s of [-1, 1]){
-    const sw = walking ? Math.sin(w.phase + (s > 0 ? Math.PI : 0)) * 0.55 : s * 0.06;
-    ctx.beginPath();
-    ctx.moveTo(x, hipY);
-    ctx.lineTo(x + Math.sin(sw) * h * 0.46, gy);
-    ctx.stroke();
+  if (walking) w.phase += dt * w.stride;
+  w.lookK += ((w.state === 'pause' ? 1 : 0) - w.lookK) * Math.min(1, dt * 3);
+  const hipY = gy - h * 0.46, shY = gy - h * 0.76;
+  const headR = h * 0.072;
+  const headX = x + w.lookK * h * 0.012;
+  const headY = shY - headR * 1.7 - w.lookK * headR * 0.5;
+  const ink = `rgba(${w.tone},${w.tone + 4},${w.tone},0.9)`;
+  ctx.fillStyle = ink; ctx.strokeStyle = ink;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const thighL = h * 0.23, shinL = h * 0.23;
+  for (const s of [-1, 1]){ // 腿：大腿+小腿，膝盖弯曲
+    const ph = w.phase + (s > 0 ? Math.PI : 0);
+    const thA = walking ? Math.sin(ph) * 0.48 : s * 0.045;
+    const bend = walking ? 0.12 + Math.max(0, Math.sin(ph + 0.6)) * 0.85 : 0.07;
+    const kx = x + Math.sin(thA) * thighL, ky = hipY + Math.cos(thA) * thighL;
+    const shA = thA - bend;
+    const fx = kx + Math.sin(shA) * shinL, fy = ky + Math.cos(shA) * shinL;
+    ctx.lineWidth = h * 0.052;
+    ctx.beginPath(); ctx.moveTo(x, hipY); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
   }
-  // 躯干
-  ctx.lineWidth = h * 0.11;
-  ctx.beginPath(); ctx.moveTo(x, hipY); ctx.lineTo(x, neckY); ctx.stroke();
-  // 手臂（摆动）
-  ctx.lineWidth = h * 0.045;
-  const armSwing = walking ? Math.sin(w.phase + Math.PI) * 0.4 : 0.08;
+  const swd = h * 0.105, hwd = h * 0.07; // 躯干：肩宽腰窄
   ctx.beginPath();
-  ctx.moveTo(x, neckY + h * 0.06);
-  ctx.lineTo(x + Math.sin(armSwing) * h * 0.3, neckY + h * 0.34);
-  ctx.stroke();
-  // 头
-  ctx.beginPath(); ctx.arc(x, headY, headR, 0, TAU); ctx.fill();
+  ctx.moveTo(x - swd, shY); ctx.lineTo(x + swd, shY);
+  ctx.quadraticCurveTo(x + hwd * 1.15, (shY + hipY) / 2, x + hwd, hipY);
+  ctx.lineTo(x - hwd, hipY);
+  ctx.quadraticCurveTo(x - hwd * 1.15, (shY + hipY) / 2, x - swd, shY);
+  ctx.closePath(); ctx.fill();
+  const aL1 = h * 0.17, aL2 = h * 0.16; // 手臂：上臂+前臂
+  for (const s of [-1, 1]){
+    const ph = w.phase + (s > 0 ? 0 : Math.PI);
+    const aA = walking ? Math.sin(ph) * 0.38 : s * 0.06;
+    const ex = x + Math.sin(aA) * aL1, ey = shY + h * 0.04 + Math.cos(aA) * aL1;
+    const hA = aA - (0.25 + (walking ? Math.max(0, -Math.sin(ph)) * 0.3 : 0)) * 0.5;
+    const hx = ex + Math.sin(hA) * aL2, hy = ey + Math.cos(hA) * aL2;
+    ctx.lineWidth = h * 0.042;
+    ctx.beginPath(); ctx.moveTo(x, shY + h * 0.04); ctx.lineTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
+  }
+  ctx.lineWidth = headR * 0.7; // 脖子
+  ctx.beginPath(); ctx.moveTo(x, shY); ctx.lineTo(headX, headY + headR * 0.8); ctx.stroke();
+  ctx.beginPath(); ctx.arc(headX, headY, headR, 0, TAU); ctx.fill(); // 头
 }
 function updateWalkers(dt, now){
   if (now > nextWalkAt){ spawnWalkers(); scheduleWalk(now, false); }
@@ -483,8 +624,6 @@ function updateWalkers(dt, now){
     const w = walkers[i];
     if (w.state === 'walk'){
       w.x += w.speed * dt;
-      w.phase += dt * w.stride;
-      // 走到树下就驻足看一会儿
       const stopX = treeX + (w.dir > 0 ? -R(46, 80) : R(46, 80));
       if (!w.looked && ((w.dir > 0 && w.x >= stopX) || (w.dir < 0 && w.x <= stopX))){
         w.state = 'pause'; w.pauseT = R(4, 8); w.looked = true;
@@ -493,7 +632,7 @@ function updateWalkers(dt, now){
       w.pauseT -= dt;
       if (w.pauseT <= 0) w.state = 'walk';
     }
-    drawWalker(w, now);
+    drawWalker(w, dt);
     if ((w.dir > 0 && w.x > W + 60) || (w.dir < 0 && w.x < -60)) walkers.splice(i, 1);
   }
 }
@@ -507,29 +646,25 @@ function frame(now){
   if (!running) return;
   const dt = Math.min((now - last) / 1000 || 0, 0.05); last = now;
   updateWind(now, dt);
+  updateAmbient(now, dt);
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(wood, 0, 0, W, H);
-  updateWalkers(dt, now);                       // 行人在树后、花穗前
-  const swayBoost = 1 + wind.v * 2.4;
-  for (const c of clusters){                    // 花穗：风越大摆得越厉害
-    const ang = Math.sin(now * 0.001 * c.speed * (1 + wind.v * 0.7) + c.phase) * c.amp * swayBoost
-              + wind.v * wind.dir * 0.10;
-    ctx.save();
-    ctx.translate(c.x, c.y); ctx.rotate(ang);
-    ctx.drawImage(c.sprite, -c.sw / 2, -8, c.sw, c.sh);
-    ctx.restore();
-  }
-  updatePetals(dt, now);
+  drawLeaves(now, dt);
+  updateWalkers(dt, now);
+  drawClusters(now, dt);
+  updatePetals(dt);
   updateBirds(dt, now);
   updateSong(now);
 }
 
 function build(){
   size();
-  branches.length = 0; clusters.length = 0; leafAt.length = 0;
+  trunk.pts = []; limbs.length = 0;
+  clusters.length = 0; leaves.length = 0;
   petals = []; birds = []; walkers = [];
   petalAcc = 0;
-  genBranch(treeX + R(-8, 8), H + 40, -Math.PI / 2 + R(-0.06, 0.06), H * 0.24, 30, 5);
+  genTrunk();
+  genLimbs();
   renderWood();
   const now = performance.now();
   wind.holdUntil = now + R(9000, 20000);
@@ -540,7 +675,26 @@ addEventListener('resize', () => { build(); });
 
 if (matchMedia('(prefers-reduced-motion: reduce)').matches){
   ctx.drawImage(wood, 0, 0, W, H);
-  for (const c of clusters) ctx.drawImage(c.sprite, c.x - c.sw / 2, c.y - 8, c.sw, c.sh);
+  const now = 0;
+  for (const l of leaves){
+    ctx.save();
+    ctx.translate(l.x, l.y);
+    ctx.rotate((l.up < 0 ? -Math.PI / 2 : Math.PI / 2) + l.tilt);
+    const s = 42 * S * l.s;
+    ctx.strokeStyle = 'rgba(105,125,90,.9)'; ctx.lineWidth = Math.max(1.2, 1.6 * S);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -s); ctx.stroke();
+    for (let i = 0; i < 5; i++){
+      const t = i / 4, yy = -s * 0.18 - t * s * 0.68, w = s * 0.30 * (1 - t * 0.42);
+      for (const dir of [-1, 1]){
+        ctx.fillStyle = 'rgba(124,152,108,.92)';
+        ctx.beginPath();
+        ctx.ellipse(dir * w * 0.62, yy, w * 0.62, w * 0.3, dir * 0.45, 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  for (const c of clusters) ctx.drawImage(c.sprite, c.x - c.sw / 2, c.y - 8 * S, c.sw, c.sh);
 } else {
   requestAnimationFrame(n => { last = n; requestAnimationFrame(frame); });
 }
