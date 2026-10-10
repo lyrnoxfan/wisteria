@@ -55,9 +55,9 @@ function size(){
   S = clamp(Math.min(W, H) / 750, 0.68, 1);
   treeX = W > 700 ? W * 0.56 : W * 0.5;
   groundY = H * 0.94;
-  // 竖屏：树冠撑满宽度，树更高大
-  trunkTopY = H * (portrait ? 0.36 : 0.44);
-  canopyR = W * (portrait ? 0.44 : 0.30);
+  // 藤棚式：树干短粗，树冠横向铺开
+  trunkTopY = H * 0.60;
+  canopyR = W * (portrait ? 0.46 : 0.32);
 }
 
 /* ================= 树 ================= */
@@ -67,20 +67,19 @@ const clusters = []; // 花穗（动态：摆动+触摸）
 const leaves = [];   // 复叶（动态：微摆+触摸），全部贴枝生长
 
 function genTrunk(){
-  const segs = 10;
-  let x = treeX + R(-12, 12) * S, y = H + 60;
-  let ang = -Math.PI / 2 + R(-0.1, 0.1);
+  const segs = 8;
+  let x = treeX + R(-10, 10) * S, y = H + 60;
+  let ang = -Math.PI / 2 + R(-0.15, 0.15);
   trunk.pts = [[x, y]];
   const totalLen = y - trunkTopY;
-  trunk.w0 = 44 * S; trunk.w1 = 15 * S;
+  trunk.w0 = 68 * S; trunk.w1 = 22 * S; // 短粗
   for (let i = 0; i < segs; i++){
-    ang += R(-0.5, 0.5);                    // 虬曲
-    ang = ang * 0.76 + (-Math.PI / 2) * 0.24; // 拉回向上
-    // 水平回中：不许跑出画面
-    const pull = clamp((treeX - x) * 0.004, -0.3, 0.3);
-    const sl = totalLen / segs * R(0.92, 1.08);
+    ang += R(-0.7, 0.7);                      // 强虬曲
+    ang = ang * 0.72 + (-Math.PI / 2) * 0.28;
+    const pull = clamp((treeX - x) * 0.006, -0.35, 0.35);
+    const sl = totalLen / segs * R(0.9, 1.1);
     x += (Math.cos(ang) + pull) * sl; y += Math.sin(ang) * sl;
-    x = clamp(x, W * 0.2, W * 0.8);
+    x = clamp(x, W * 0.25, W * 0.75);
     trunk.pts.push([x, y]);
   }
 }
@@ -91,8 +90,8 @@ function lerpC(c1, c2, t){
 
 /* 花穗：总状花序，细长下垂 */
 function addCluster(x, y, s){
-  if (clusters.length >= 140) return;
-  const len = R(105, 200) * S * s, maxW = R(13, 19) * S * s;
+  if (clusters.length >= 180) return;
+  const len = R(120, 230) * S * s, maxW = R(13, 19) * S * s;
   const variant = rnd();
   const top = variant < 0.7 ? [93, 64, 150] : variant < 0.9 ? [120, 94, 176] : [194, 128, 168];
   const tip = variant < 0.7 ? [228, 210, 244] : variant < 0.9 ? [234, 222, 248] : [250, 230, 240];
@@ -140,36 +139,36 @@ function addLeaf(x, y, up){
 
 function genLimbs(){
   const top = trunk.pts[trunk.pts.length - 1];
-  const n = 6;
+  const n = 10; // 更多主枝，密 canopy
   for (let i = 0; i < n; i++){
     const f = i / (n - 1) - 0.5; // -0.5..0.5
-    // 目标端点：伞形——外侧枝端下垂，中央稍高
-    const tx = top[0] + f * 2 * canopyR * 0.95;
-    const ty = top[1] - 50 * S + Math.abs(f) * 130 * S;
+    // 目标端点：平坦伞形，横向铺开
+    const tx = top[0] + f * 2 * canopyR * 0.98;
+    const ty = top[1] - 25 * S + Math.abs(f) * 55 * S;
     let x = top[0] + R(-14, 14) * S, y = top[1] + R(-10, 14) * S;
     const pts = [[x, y]];
     const segs = 7;
     for (let sgm = 0; sgm < segs; sgm++){
       const t = (sgm + 1) / segs;
       const ix = top[0] + (tx - top[0]) * t;
-      const iy = top[1] + (ty - top[1]) * t - Math.sin(t * Math.PI) * 30 * S;
+      const iy = top[1] + (ty - top[1]) * t - Math.sin(t * Math.PI) * 22 * S;
       x += (ix - x) * 0.55 + R(-14, 14) * S;
       y += (iy - y) * 0.55 + R(-14, 14) * S;
       pts.push([x, y]);
       if (sgm >= 1){
-        const ncl = 1 + (rnd() < 0.75 ? 1 : 0);
+        const ncl = 1 + (rnd() < 0.8 ? 1 : 0) + (rnd() < 0.3 ? 1 : 0);
         for (let k = 0; k < ncl; k++)
           addCluster(x + R(-10, 10) * S, y + R(0, 8) * S, R(0.8, 1.05));
       }
-      if (rnd() < 0.62) addLeaf(x + R(-8, 8) * S, y - R(4, 12) * S, -1);
-      if (rnd() < 0.22) addLeaf(x + R(-8, 8) * S, y + R(6, 14) * S, 1);
+      if (rnd() < 0.85) addLeaf(x + R(-8, 8) * S, y - R(4, 12) * S, -1);
+      if (rnd() < 0.30) addLeaf(x + R(-8, 8) * S, y + R(6, 14) * S, 1);
     }
     const tip = pts[pts.length - 1];
     addCluster(tip[0] + R(-6, 6) * S, tip[1] + 4 * S, R(0.7, 0.9));
-    limbs.push({ pts, w0: 15 * S, w1: 2.2 * S });
+    limbs.push({ pts, w0: 13 * S, w1: 2.2 * S });
   }
-  for (let i = 0; i < 14; i++)
-    addCluster(top[0] + R(-70, 70) * S, top[1] + R(-10, 40) * S, R(0.7, 1));
+  for (let i = 0; i < 20; i++)
+    addCluster(top[0] + R(-80, 80) * S, top[1] + R(-10, 40) * S, R(0.7, 1));
 }
 
 /* 木质部 + 地面：预渲染静态层 */
