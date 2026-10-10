@@ -1,0 +1,1 @@
+{"description":"藤 — 一棵挂在网上的日本紫藤，纯视觉动态场景","devDependencies":{"wrangler":"^4"},"name":"wisteria","private":true,"scripts":{"deploy":"wrangler deploy","dev":"wrangler dev","preview":"python3 -m http.server 8080 --directory site"},"version":"1.0.0"}

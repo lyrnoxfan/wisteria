@@ -1,0 +1,8 @@
+# 藤 — Cloudflare Workers 静态资源部署（无需自写 Worker 代码）
+name = "wisteria"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./site"
+# 未知路径返回 site/404.html，并带 404 状态码
+not_found_handling = "404-page"
