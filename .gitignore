@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 __pycache__/
 .bridge-deploy.py
+media-generation-*.json
