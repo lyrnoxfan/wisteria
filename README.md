@@ -1,26 +1,36 @@
 # 藤
 
-一棵挂在网上的日本紫藤。纯视觉，大面积留白。
+一棵挂在网上的日本紫藤。没有菜单，没有说明文字：只有一棵树、风、昼夜、来访的鸟和偶尔在树下停住的人。
 
-## 场景
+## 现在的场景
 
-- **紫藤**：程序化生成的日本紫藤（固定种子，每次打开是同一棵树），
-  85 串花穗钟摆微摆、羽状复叶、落花。
-- **风**：时不时来一阵，花穗摆动加剧、落花增多并被吹偏。
-- **鸟**：时不时一两只远鸟掠过，偶尔一小群（3~7 只），偶尔近处一对。
-- **鸟鸣**：WebAudio 实时合成的远处鸟叫，淡入、响几声、淡出；
-  首次点击/触摸页面后解锁（浏览器自动播放策略）。
-- **行人**：时不时有一两个行人走过，在树下驻足仰望几秒再离开。
+- 水墨伞形紫藤树冠与真实花穗素材；紫藤、白藤、粉藤三种花色可以通过 `?fuji=violet|white|pink` 指定。
+- 花串以真实枝条锚点为基础的链式物理，阵风时一起摆动；点击或拖动会拨开花串并打落花瓣。
+- 花瓣会在空气中翻转、受风，落到地面后短暂堆积，行人走过会踢起它们。
+- 梅鸟会飞来停在枝头、转头、跳枝、啄花、鸣叫；燕子掠过，远处有鸟群，黄昏有归鸦，地面有会跳动的麻雀。
+- Muse 行人精灵会从画面一侧走来，在树下减速、抬头停住，再继续离开；走路和抬头姿势交叉淡化。
+- 本地时间驱动天空、月相、星星、霞带、薄雾、树影与夜间地灯。
+- Web Audio 实时合成双声道风声、叶声、脚步、振翅、拨花沙沙、树莺、梅鸟、麻雀、燕子、乌鸦、猫头鹰和远寺钟；第一次触摸后解锁。
+- `prefers-reduced-motion` 会变成静止插画；URL 可用 `?hour=12&seed=7` 做截图和调试。
 
-零文字、零外部资源，单文件 `site/index.html`（canvas + WebAudio）。
-`prefers-reduced-motion` 下只渲染静态树。
+## 本地预览
+
+```bash
+cd site
+python3 -m http.server 8080
+```
+
+然后打开 <http://localhost:8080/>。可用 `?hour=21&fuji=white&seed=7` 查看夜晚白藤。
 
 ## 部署
 
-Cloudflare Workers 静态资源模式（`wrangler.toml`）。
+`wrangler.toml` 保留 Cloudflare Workers Static Assets 配置；`.github/workflows/deploy.yml` 会在推送 `main` 后尝试部署，但需要仓库中的 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` secrets。
 
-- 长期：GitHub Actions push main 自动 `wrangler deploy`
-  （需仓库 secrets `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`，
-  token 必须在 Cloudflare 面板亲手创建——经 API 建会被 403）。
-- 过渡：`.bridge-deploy.py`（gitignore，不进仓库）把 `site/` 内联成
-  Worker 经 API 直接上传，先顶上线。
+当前线上域名 `lyrnox.com` 由 `home` Worker 入口承载。`deploy/home-worker.js` 是不依赖 Worker Assets 的过渡入口：把 `SITE_SHA` 换成站点提交后，它会从 GitHub 固定提交拉取 `site/`，并在边缘缓存静态文件。
+
+## 目录
+
+- `site/index.html`：极简页面壳
+- `site/js/`：天空、树、花串、花瓣、鸟、行人、时钟、风场、输入和音频模块
+- `site/img/`：树、花穗、Muse 姿势、PWA 图标和分享图
+- `deploy/home-worker.js`：线上 `home` Worker 的固定提交入口

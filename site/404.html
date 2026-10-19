@@ -2,14 +2,38 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbfaf7">
+<meta name="robots" content="noindex">
 <title>藤 · 无</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
-  *{margin:0;padding:0}
-  html,body{height:100%;background:#fbfaf7}
-  body{display:flex;align-items:center;justify-content:center;
-    font-family:"Songti SC","STSong",serif;color:#c9c4b8;font-size:44px;letter-spacing:.5em;text-indent:.5em}
+  html, body { margin: 0; height: 100%; background: #fbfaf7; overflow: hidden; }
+  a { position: fixed; inset: 0; display: block; color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .mu {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+    font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+    font-size: 40px; color: #cfc9bc; letter-spacing: 0;
+    animation: in 2.4s ease both;
+  }
+  .p {
+    position: absolute; left: 50%; top: -6%; width: 14px; height: 12px;
+    animation: fall 11s linear infinite, sway 3.7s ease-in-out infinite alternate;
+  }
+  .p i {
+    display: block; width: 100%; height: 100%;
+    background: radial-gradient(circle at 40% 35%, #c9b4ec, #8f70cf 70%, #7a5cbd);
+    border-radius: 60% 60% 55% 55% / 70% 70% 40% 40%;
+    animation: spin 2.3s linear infinite;
+  }
+  @keyframes in { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes fall { 0% { top: -6%; opacity: 0 } 8% { opacity: .9 } 86% { opacity: .9 } 100% { top: 104%; opacity: 0 } }
+  @keyframes sway { from { margin-left: -60px } to { margin-left: 50px } }
+  @keyframes spin { 0% { transform: rotate(0) scaleX(1) } 50% { transform: rotate(180deg) scaleX(.25) } 100% { transform: rotate(360deg) scaleX(1) } }
+  @media (prefers-reduced-motion: reduce) { .p { display: none } }
 </style>
 </head>
-<body>无</body>
+<body>
+<a href="/" aria-label="回到树下"><span class="mu">无</span><span class="p"><i></i></span></a>
+</body>
 </html>
