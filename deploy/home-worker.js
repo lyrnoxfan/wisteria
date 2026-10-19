@@ -8,7 +8,7 @@
 // 发布新版本 = push 到 GitHub + 把 SITE_SHA 换成新提交重新上传本脚本（几 KB）。
 // 回滚 = 把 SITE_SHA 改回旧提交。
 
-const SITE_SHA = "78be0adae457967199156cf88e74b94ee2625f28";
+const SITE_SHA = "16bf7a798d860324ac0ee1de605764ac30f4cc1a";
 const REPO = "lyrnoxfan/wisteria";
 const ROOT = "site";
 
