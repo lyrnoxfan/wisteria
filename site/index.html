@@ -28,7 +28,12 @@
    风(阵风+风声) · 鸟 · 远处鸟鸣 · 叶动声 · 树下驻足的行人
    触摸：手指拨开枝叶，划动可拨乱并打落花瓣
    ============================================================ */
-const SEED = 20261010;
+// 每次进入都不同：真随机种子（?seed=123 可固定复现）
+const SEED = (() => {
+  const q = new URLSearchParams(location.search).get('seed');
+  if (q !== null) return parseInt(q, 10) >>> 0;
+  return ((Date.now() % 2147483647) ^ (Math.random() * 0x7fffffff)) >>> 0;
+})();
 function mulberry32(a){
   return function(){
     a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -56,10 +61,11 @@ function size(){
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const portrait = H > W * 1.15;
   S = clamp(Math.min(W, H) / 750, 0.68, 1);
-  // 树图：按高适配，居中，根部略出底边
-  treeDH = H * 0.98;
+  // 树图：按高适配，居中，根部略出底边；每次随机微调大小和位置
+  const tScale = R(0.94, 1.06), tShift = R(-0.04, 0.04);
+  treeDH = H * 0.98 * tScale;
   treeDW = treeDH * (520 / 1040);
-  treeX0 = (W - treeDW) / 2;
+  treeX0 = (W - treeDW) / 2 + W * tShift;
   treeY0 = H * 1.015 - treeDH;
   groundY = H * 0.94;
 }
@@ -85,7 +91,7 @@ const racemes = []; // 垂花串（动态：钟摆+触摸）
 // 树图内枝条区（分数坐标），花串挂在这里
 function genRacemes(){
   racemes.length = 0;
-  const n = 60;
+  const n = 52 + Math.floor(rnd() * 17); // 52-68 串，每次数量不同
   for (let i = 0; i < n; i++){
     const fx = 0.06 + 0.88 * (i / (n - 1)) + R(-0.035, 0.035);
     const fy = i < 42 ? R(0.09, 0.34) : R(0.30, 0.42);
