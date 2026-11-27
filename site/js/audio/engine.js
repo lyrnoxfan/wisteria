@@ -1,7 +1,7 @@
 // 音频引擎：首次触摸后创建；主压缩防爆音；合成卷积混响营造"远处"的空间感
 import { clamp, params } from '../lib/util.js';
 
-export const A = { ac: null, master: null, bus: null, rev: null, ready: false, noise: null };
+export const A = { ac: null, master: null, bus: null, rev: null, ready: false, noise: null, muted: !!params.mute };
 
 function makeIR(ac, secs, decay) {
   const len = Math.floor(ac.sampleRate * secs);
@@ -21,7 +21,7 @@ function makeIR(ac, secs, decay) {
 }
 
 export function unlockAudio() {
-  if (params.mute) return;
+  if (A.muted) return;
   if (A.ac) {
     if (A.ac.state === 'suspended') A.ac.resume();
     return;
@@ -51,7 +51,7 @@ export function unlockAudio() {
   A.master = ac.createGain();
   A.master.gain.value = 0;
   A.master.connect(comp);
-  A.master.gain.setTargetAtTime(1, ac.currentTime + 0.05, 0.9);
+  if (!A.muted) A.master.gain.setTargetAtTime(1, ac.currentTime + 0.05, 0.9);
 
   A.bus = ac.createGain();
   A.bus.connect(A.master);
@@ -76,7 +76,12 @@ export function unlockAudio() {
   });
 }
 
-export const audioOn = () => A.ready && A.ac && A.ac.state === 'running';
+export function setAudioMuted(muted) {
+  A.muted = !!muted;
+  if (A.master && A.ac) A.master.gain.setTargetAtTime(A.muted ? 0 : 1, A.ac.currentTime, 0.08);
+}
+
+export const audioOn = () => A.ready && !A.muted && A.ac && A.ac.state === 'running';
 
 // 声像 + 干/湿 + 可选低通（距离感）
 export function voiceOut(pan = 0, dry = 0.6, wet = 0.5, lp = 0) {

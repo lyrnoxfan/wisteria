@@ -12,7 +12,7 @@ import { initPetals, updatePetals, drawAirPetals, drawGroundPetals, burstAt, res
 import { initGround, layoutGround, drawGround } from './view/ground.js';
 import { updateBirds, drawFarBirds, drawPerchedBirds, drawNearBirds, drawGroundBirds, resetBirds, spawnMejiro, spawnSwallows, spawnFlock, spawnSparrows } from './view/birds.js';
 import { initWalkers, layoutWalkers, tintWalkers, updateWalkers, drawWalkers, spawnWalker } from './view/walkers.js';
-import { unlockAudio } from './audio/engine.js';
+import { unlockAudio, setAudioMuted } from './audio/engine.js';
 import { startAmbience, updateAmbience, rustleTouch } from './audio/ambience.js';
 import * as V from './audio/voices.js';
 import { Director } from './director.js';
@@ -51,7 +51,10 @@ const cultivar = CULTIVARS[fuji];
 S.layoutJitter = { x: rng.range(-0.025, 0.025), s: rng.range(0.96, 1.03) };
 S.revealDur = 2.8;
 
-const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+let motionMode = motionQuery && motionQuery.matches ? 'still' : 'full';
+let motionOverride = false;
+let soundMuted = !!params.mute;
 const clock = new Clock();
 const wind = new Wind();
 const director = new Director();
@@ -60,6 +63,9 @@ let palTimer = 0;
 const themeMeta = document.querySelector('meta[name="theme-color"]');
 
 const canvas = document.getElementById('fuji');
+const motionButton = document.getElementById('motion-toggle');
+const soundButton = document.getElementById('sound-toggle');
+const notice = document.getElementById('scene-notice');
 initStage(canvas);
 S.pal = paletteAt(clock.hour());
 S.hour = S.pal.hour;
@@ -95,7 +101,7 @@ function relayout() {
     resetPetals();
   }
   onPalette();
-  if (still) renderStill();
+  if (motionMode === 'still') renderStill();
 }
 
 function loadImg(src) {
@@ -115,17 +121,24 @@ function onBrush(x, y, energy) {
 }
 
 async function boot() {
-  const [tree, walk, look, ...sprites] = await Promise.all([
-    loadImg(TREE.src),
-    loadImg('/img/walker-walk.webp'),
-    loadImg('/img/walker-look.webp'),
-    ...cultivar.sprites.map(loadImg),
-  ]);
+  const tree = await loadImg(TREE.src);
+  const spriteResults = await Promise.allSettled(cultivar.sprites.map(loadImg));
+  const loadedSprites = spriteResults.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  if (!loadedSprites.length) throw new Error('flower sprites unavailable');
+  const sprites = spriteResults.map((r, i) => r.status === 'fulfilled' ? r.value : loadedSprites[i % loadedSprites.length]);
+  const [walkResult, lookResult] = await Promise.allSettled([loadImg('/img/walker-walk.webp'), loadImg('/img/walker-look.webp')]);
+  const walkersReady = walkResult.status === 'fulfilled' && lookResult.status === 'fulfilled';
+  const walk = walkersReady ? walkResult.value : null;
+  const look = walkersReady ? lookResult.value : null;
+  if (spriteResults.some((r) => r.status === 'rejected') || !walkersReady) {
+    notice.textContent = '部分素材暂时未能加载，已跳过缺失的装饰。';
+    notice.hidden = false;
+  }
   initTree(tree);
   initRacemes(sprites, cultivar, onBrush);
   initPetals(cultivar.petals);
   initGround(cultivar);
-  initWalkers(walk, look);
+  if (walkersReady) initWalkers(walk, look);
   layoutTree();
   layoutRacemes(seed);
   layoutGround(seed);
@@ -135,32 +148,33 @@ async function boot() {
   S.revealT0 = S.t + 0.15;
   director.start(S.t);
   document.documentElement.dataset.fuji = fuji;
-  if (still) renderStill();
+  if (motionMode === 'still') renderStill();
 }
 
 function step(dt) {
-  S.dt = dt;
-  S.t += dt;
-  palTimer -= dt;
+  const motionDt = motionMode === 'soft' ? dt * 0.55 : dt;
+  S.dt = motionDt;
+  S.t += motionDt;
+  palTimer -= motionDt;
   if (palTimer <= 0) {
     palTimer = params.speed > 1 ? 0.1 : 0.5;
     S.pal = paletteAt(clock.hour());
     S.hour = S.pal.hour;
     onPalette();
   }
-  updateInput(dt);
-  wind.update(dt, S.t, S.W, S.pal);
+  updateInput(motionDt);
+  wind.update(motionDt, S.t, S.W, S.pal);
   if (ready) {
     S.reveal = clamp((S.t - S.revealT0) / S.revealDur, 0, 1);
-    updateTree(dt, wind);
-    const sub = dt > 1 / 45 ? 2 : 1;
-    for (let i = 0; i < sub; i++) updateRacemes(dt / sub, wind, pointers);
-    updatePetals(dt, wind, S.reveal >= 1);
-    updateBirds(dt, wind, pointers);
-    updateWalkers(dt);
+    updateTree(motionDt, wind);
+    const sub = motionDt > 1 / 45 ? 2 : 1;
+    for (let i = 0; i < sub; i++) updateRacemes(motionDt / sub, wind, pointers);
+    updatePetals(motionDt, wind, S.reveal >= 1);
+    updateBirds(motionDt, wind, pointers);
+    updateWalkers(motionDt);
     director.update(S.t, S.pal);
   }
-  updateAmbience(dt, S.t, wind, S.pal);
+  updateAmbience(motionDt, S.t, wind, S.pal);
 }
 
 function render() {
@@ -199,9 +213,11 @@ function renderStill() {
 
 // 自适应画质：主线程每帧耗时持续偏高就降分辨率
 let last = performance.now();
+let rafId = 0;
 let work = 8, workT = 0;
 function frame(now) {
-  requestAnimationFrame(frame);
+  rafId = 0;
+  if (document.hidden || motionMode === 'still') return;
   let dt = (now - last) / 1000;
   last = now;
   if (!(dt > 0)) return;
@@ -219,7 +235,64 @@ function frame(now) {
       relayout();
     }
   }
+  if (!document.hidden && motionMode !== 'still') rafId = requestAnimationFrame(frame);
 }
+
+function startLoop() {
+  if (rafId || document.hidden || motionMode === 'still') return;
+  last = performance.now();
+  rafId = requestAnimationFrame(frame);
+}
+
+function updateMotionButton() {
+  motionButton.textContent = motionMode === 'full' ? '完整动态' : motionMode === 'soft' ? '轻柔动态' : '静帧';
+  motionButton.setAttribute('aria-label', `当前${motionButton.textContent}，切换动画强度`);
+}
+
+function setMotionMode(mode, userChoice = false) {
+  motionMode = mode;
+  if (userChoice) motionOverride = true;
+  updateMotionButton();
+  if (motionMode === 'still') {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    renderStill();
+  } else startLoop();
+}
+
+motionButton.addEventListener('click', () => {
+  const next = motionMode === 'full' ? 'soft' : motionMode === 'soft' ? 'still' : 'full';
+  setMotionMode(next, true);
+});
+soundButton.addEventListener('click', () => {
+  soundMuted = !soundMuted;
+  setAudioMuted(soundMuted);
+  if (!soundMuted) { unlockAudio(); startAmbience(); }
+  soundButton.textContent = soundMuted ? '声音：关' : '声音：开';
+  soundButton.setAttribute('aria-label', soundMuted ? '开启环境音' : '静音环境音');
+});
+canvas.addEventListener('keydown', (e) => {
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    onBrush(S.W * 0.5, S.H * 0.58, 0.45);
+  }
+});
+if (motionQuery) {
+  const onMotionPreference = (e) => {
+    if (!motionOverride) setMotionMode(e.matches ? 'still' : 'full');
+  };
+  if (motionQuery.addEventListener) motionQuery.addEventListener('change', onMotionPreference);
+  else if (motionQuery.addListener) motionQuery.addListener(onMotionPreference);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+  } else startLoop();
+});
+updateMotionButton();
+soundButton.textContent = soundMuted ? '声音：关' : '声音：开';
+soundButton.setAttribute('aria-label', soundMuted ? '开启环境音' : '静音环境音');
 
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
@@ -228,10 +301,11 @@ window.addEventListener('resize', () => {
 });
 
 boot().catch(() => {
-  /* 素材加载失败时至少保留天色 */
+  notice.textContent = '场景素材暂时未能加载，请刷新页面重试。';
+  notice.hidden = false;
 });
-if (still) renderStill();
-else requestAnimationFrame(frame);
+if (motionMode === 'still') renderStill();
+else startLoop();
 
 // 调试 / 截图用（控制台）：__fuji.spawn.mejiro() 等
 window.__fuji = {

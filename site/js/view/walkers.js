@@ -22,6 +22,7 @@ function scaled(img, h) {
 }
 
 export function layoutWalkers() {
+  if (!imgWalk || !imgLook) { walkers.length = 0; return; }
   const h = S.tree.h * 0.2 * S.dpr;
   cWalk = { base: scaled(imgWalk, h), tint: null };
   cLook = { base: scaled(imgLook, h), tint: null };
@@ -32,6 +33,7 @@ export function layoutWalkers() {
 }
 
 export function tintWalkers(pal) {
+  if (!cWalk || !cLook) return;
   const k = pal.ink.map((v) => v | 0).join(',') + (pal.inkA * 100).toFixed(0);
   if (k === tintKey) return;
   tintKey = k;
@@ -49,7 +51,7 @@ export function tintWalkers(pal) {
 }
 
 export function spawnWalker() {
-  if (walkers.length >= 1) return false;
+  if (!imgWalk || !imgLook || walkers.length >= 1) return false;
   const dir = chance(0.5) ? 1 : -1;
   const T = S.tree;
   const h = T.h * R(0.17, 0.19);

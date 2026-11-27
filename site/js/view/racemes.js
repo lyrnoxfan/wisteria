@@ -308,7 +308,7 @@ export function drawRacemeGlow(ctx, pal) {
       const ux = dx / len, uy = dy / len;
       const h = len;
       const w = r.w;
-      ctx.globalAlpha = a0 * r.lit * r.fade * (l === 0 ? 0.2 : 0.3);
+      ctx.globalAlpha = a0 * r.lit * r.fade * [0.12, 0.22, 0.26][l];
       ctx.setTransform(uy * d, -ux * d, ux * d, uy * d, x0 * d, y0 * d);
       ctx.drawImage(g.c, -w / 2 - w * g.padX, -h * g.padY, w * (1 + 2 * g.padX), h * (1 + 2 * g.padY));
     }

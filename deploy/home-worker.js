@@ -89,7 +89,12 @@ export default {
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
     const url = new URL(req.url);
-    let path = decodeURIComponent(url.pathname);
+    let path;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch (e) {
+      return respond("Bad Request", "/400.txt", 400);
+    }
     if (!SAFE_PATH.test(path) || path.includes("..")) path = "/404.html";
     if (path.endsWith("/")) path += "index.html";
     if (!extOf(path)) path += "/index.html";

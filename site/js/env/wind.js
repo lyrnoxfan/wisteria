@@ -9,7 +9,7 @@ export class Wind {
     this.dir = chance(0.5) ? 1 : -1;
     this.base = 0.07;
     this.baseTarget = 0.07;
-    this.next = R(5, 10);
+    this.next = R(7, 12);
     this.level = 0.07; // 树附近的风力（无符号）
     this.calm = 1;
   }
@@ -23,16 +23,16 @@ export class Wind {
       if (chance(0.2)) this.dir *= -1;
       this.gusts.push({
         t0: t,
-        s: (strong ? R(0.55, 0.95) : R(0.2, 0.42)) * this.calm,
+        s: (strong ? R(0.5, 0.82) : R(0.18, 0.34)) * this.calm,
         dir: this.dir,
         c: W * R(0.45, 0.8), // 风头推进速度（px/s）
-        rise: R(0.8, 1.8),
-        dur: strong ? R(3, 6.5) : R(2.5, 5),
-        fall: R(1.8, 3.2),
+        rise: R(1.2, 2.1),
+        dur: strong ? R(2.4, 4.2) : R(2, 3.5),
+        fall: R(2.5, 4),
         seed: R(0, 100),
       });
-      this.next = t + (strong ? R(9, 18) : R(5, 12));
-      this.baseTarget = R(0.03, 0.15) * this.calm;
+      this.next = t + (strong ? R(11, 19) : R(8, 15));
+      this.baseTarget = R(0.025, 0.11) * this.calm;
     }
     this.base = damp(this.base, this.baseTarget, 0.25, dt);
     const span = W * 1.3;
