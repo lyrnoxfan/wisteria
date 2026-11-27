@@ -38,3 +38,31 @@ test('site shell keeps zoom available and exposes keyboard/motion/sound controls
   assert.match(html, /id="sound-toggle"/);
   assert.match(html, /tabindex="0"/);
 });
+
+const previewSource = await readFile(new URL('../deploy/preview-worker.js', import.meta.url), 'utf8');
+const previewWorker = await import(`data:text/javascript;base64,${Buffer.from(previewSource).toString('base64')}`);
+
+test('isolated preview serves the pinned branch and hardens responses', async () => {
+  let requestedUrl = '';
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response('<!doctype html><title>preview</title>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+  };
+  const response = await previewWorker.default.fetch(new Request('https://preview.example/'), {}, ctx);
+  assert.match(requestedUrl, /raw\.githubusercontent\.com\/lyrnoxfan\/wisteria\/3487312dc0766080d0880371a44b9fd85b12b59c\/site\/index\.html$/);
+  assert.equal(response.headers.get('x-site-version'), '3487312');
+  assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.match(await response.text(), /preview/);
+});
+
+test('isolated preview rejects malformed paths before fetching upstream', async () => {
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error('unexpected fetch'); };
+  const response = await previewWorker.default.fetch(new Request('https://preview.example/%E0%A4%A'), {}, ctx);
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(fetched, false);
+});
