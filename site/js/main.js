@@ -220,7 +220,8 @@ function frame(now) {
   if (document.hidden || motionMode === 'still') return;
   let dt = (now - last) / 1000;
   last = now;
-  if (!(dt > 0)) return;
+  // A rAF timestamp can match performance.now() on the first frame; keep the loop alive.
+  if (!(dt > 0)) dt = 1 / 60;
   if (dt > 0.1) dt = 0.1;
   const t0 = performance.now();
   step(dt);
