@@ -5,8 +5,8 @@
 //   1. 按固定提交（SITE_SHA）从 GitHub 拉对应文件，内容不可变，边缘永久缓存；
 //   2. 按扩展名给出正确的 Content-Type 和缓存策略；
 //   3. 统一加安全头。
-// 发布新版本 = push 到 GitHub + 把 SITE_SHA 换成新提交重新上传本脚本（几 KB）。
-// 回滚 = 把 SITE_SHA 改回旧提交。
+// 此预览固定服务本分支的一个源码提交；不会配置自定义域名或生产路由。
+// 更新预览需另行修改 SITE_SHA 并重新部署此独立 Worker。
 
 const SITE_SHA = "3487312dc0766080d0880371a44b9fd85b12b59c";
 const REPO = "lyrnoxfan/wisteria";
