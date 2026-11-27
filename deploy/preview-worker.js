@@ -21,7 +21,6 @@ function withHeaders(response, path) {
 
 export default {
   async fetch(request) {
-    try {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
@@ -42,10 +41,6 @@ export default {
       return withHeaders(upstream, path);
     } catch {
       return withHeaders(new Response("藤 · 暂时无法连接源站", { status: 502 }), "/502.txt");
-    }
-    } catch (error) {
-      console.error("Preview Worker exception", error?.stack || error);
-      return new Response(`Preview diagnostic: ${error?.name || "Error"}: ${error?.message || String(error)}`, { status: 500, headers: SECURITY });
     }
   },
 };
